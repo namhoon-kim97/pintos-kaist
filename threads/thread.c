@@ -123,12 +123,10 @@ void thread_start(void) {
     struct semaphore idle_started;
     sema_init(&idle_started, 0);
     thread_create("idle", PRI_MIN, idle, &idle_started);
-    printf("Starting thread scheduling and creating idle thread.\n");
 
     /* Start preemptive thread scheduling. */
     intr_enable();
 
-    printf("thread_start22\n");
     /* Wait for the idle thread to initialize idle_thread. */
     sema_down(&idle_started);
 }
@@ -137,7 +135,7 @@ void thread_start(void) {
    Thus, this function runs in an external interrupt context. */
 void thread_tick(void) {
     struct thread *t = thread_current();
-    printf("=========================\n Thread tick: %s (TID: %d)\n", t->name, t->tid);
+
     /* Update statistics. */
     if (t == idle_thread)
         idle_ticks++;
@@ -179,7 +177,6 @@ tid_t thread_create(const char *name, int priority,
     struct thread *t;
     tid_t tid;
 
-    printf("Creating thread: %s\n", name);
     ASSERT(function != NULL);
 
     /* Allocate thread. */
@@ -202,7 +199,6 @@ tid_t thread_create(const char *name, int priority,
     t->tf.cs = SEL_KCSEG;
     t->tf.eflags = FLAG_IF;
 
-    printf("======================\nThread created: %s (TID: %d)\n", name, tid);
     /* Add to run queue. */
     thread_unblock(t);
 
@@ -533,7 +529,6 @@ schedule(void) {
     ASSERT(is_thread(next));
     /* Mark us as running. */
     next->status = THREAD_RUNNING;
-    printf("Scheduling thread: %s (TID: %d)\n", next->name, next->tid);
 
     /* Start new time slice. */
     thread_ticks = 0;
