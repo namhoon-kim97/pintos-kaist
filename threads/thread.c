@@ -29,6 +29,7 @@
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
+static struct list sleep_list;
 
 /* Idle thread. */
 static struct thread *idle_thread;
@@ -107,6 +108,7 @@ void thread_init(void) {
     /* Init the globla thread context */
     lock_init(&tid_lock);
     list_init(&ready_list);
+    list_init(&sleep_list);
     list_init(&destruction_req);
 
     /* Set up a thread structure for the running thread. */
@@ -150,7 +152,38 @@ void thread_tick(void) {
     if (++thread_ticks >= TIME_SLICE)
         intr_yield_on_return();
 }
+void thread_sleep(int64_t ticks) {
+    struct thread *t = thread_current();
+    enum intr_level old_level;
 
+    ASSERT(intr_get_level() == INTR_ON);
+    old_level = intr_disable();
+    t->status = THREAD_BLOCKED;
+    t->wakeup_tick = ticks;
+    list_push_back(&sleep_list, &t->elem);
+
+    schedule();
+    intr_set_level(old_level);
+}
+
+void thread_wakeup(int64_t ticks) {
+    struct list_elem *e;
+    struct thread *t;
+    enum intr_level old_level;
+
+    ASSERT(intr_get_level() == INTR_OFF);
+    old_level = intr_disable();
+    for (e = list_begin(&sleep_list); e != list_end(&sleep_list);) {
+        t = list_entry(e, struct thread, elem);
+        if (t->wakeup_tick <= ticks) {
+            e = list_remove(e);
+            thread_unblock(t);
+        } else {
+            e = list_next(e);
+        }
+    }
+    intr_set_level(old_level);
+}
 /* Prints thread statistics. */
 void thread_print_stats(void) {
     printf("Thread: %lld idle ticks, %lld kernel ticks, %lld user ticks\n",
