@@ -233,11 +233,18 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
 
   /* Add to run queue. */
   thread_unblock(t);
-  if (priority > thread_get_priority()) {
-    thread_yield();
-  }
+  priority_preemption();
 
   return tid;
+}
+
+void priority_preemption() {
+  if (list_empty(&ready_list))
+    return;
+  struct thread *cur = thread_current();
+  struct thread *nxt = list_entry(list_front(&ready_list), struct thread, elem);
+  if (cur->priority < nxt->priority)
+    thread_yield();
 }
 
 /* Puts the current thread to sleep.  It will not be scheduled
@@ -332,16 +339,25 @@ void thread_yield(void) {
 
 bool cmp_priority(const struct list_elem *a, const struct list_elem *b,
                   void *aux UNUSED) {
-  if (list_entry(a, struct thread, elem)->priority >
-      list_entry(b, struct thread, elem)->priority)
-    return 1;
-  else
-    return 0;
+  return (list_entry(a, struct thread, elem)->priority >
+          list_entry(b, struct thread, elem)->priority);
+}
+
+void test_max_priority() {
+  if (list_empty(&ready_list))
+    return;
+  struct thread *t = list_entry(list_front(&ready_list), struct thread, elem);
+
+  // 현재 스레드의 바뀐 priority가 ready_list의 max priority보다 작다면
+  if (thread_get_priority() < t->priority) {
+    thread_yield();
+  }
 }
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void thread_set_priority(int new_priority) {
   thread_current()->priority = new_priority;
+  test_max_priority();
 }
 
 /* Returns the current thread's priority. */
