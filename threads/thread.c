@@ -150,17 +150,16 @@ void thread_tick(void) {
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return();
 }
+
 void thread_sleep(int64_t ticks) {
   struct thread *t = thread_current();
   enum intr_level old_level;
 
-  ASSERT(intr_get_level() == INTR_ON);
   old_level = intr_disable();
-  t->status = THREAD_BLOCKED;
   t->wakeup_tick = ticks;
   list_push_back(&sleep_list, &t->elem);
 
-  schedule();
+  thread_block();
   intr_set_level(old_level);
 }
 
@@ -169,7 +168,6 @@ void thread_wakeup(int64_t ticks) {
   struct thread *t;
   enum intr_level old_level;
 
-  ASSERT(intr_get_level() == INTR_OFF);
   old_level = intr_disable();
   for (e = list_begin(&sleep_list); e != list_end(&sleep_list);) {
     t = list_entry(e, struct thread, elem);
