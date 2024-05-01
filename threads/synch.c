@@ -181,11 +181,28 @@ void lock_acquire(struct lock *lock) {
   ASSERT(!intr_context());
   ASSERT(!lock_held_by_current_thread(lock));
 
-  if (thread_current()->priority > lock->holder->priority)
-    donate_priority(); // 만들어야 함.
+  struct thread *t = thread_current();
+  if (lock->holder) {
+    t->wait_lock = lock;
+    list_insert_ordered(&lock->holder->donations, &t->donation_elem,
+                        cmp_donate_priority, NULL);
+    donate_priority();
+  }
 
   sema_down(&lock->semaphore);
-  lock->holder = thread_current();
+  t->wait_lock = NULL;
+  lock->holder = t;
+}
+
+void donate_priority() {
+  struct thread *t = thread_current();
+  for (int i = 0; i < 8; i++) {
+    if (!t->wait_lock)
+      break;
+    struct thread *holder = t->wait_lock->holder;
+    holder->priority = t->priority;
+    t = holder;
+  }
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -216,8 +233,33 @@ void lock_release(struct lock *lock) {
   ASSERT(lock != NULL);
   ASSERT(lock_held_by_current_thread(lock));
 
+  remove_with_lock(lock);
+  refresh_priority();
   lock->holder = NULL;
   sema_up(&lock->semaphore);
+}
+
+void remove_with_lock(struct lock *lock) {
+  struct list_elem *e;
+  struct thread *t = thread_current();
+  for (e = list_begin(&t->donations); e != list_end(&t->donations);
+       e = list_next(e)) {
+    struct thread *nxt = list_entry(e, struct thread, donation_elem);
+    if (nxt->wait_lock == lock)
+      list_remove(&nxt->donation_elem);
+  }
+}
+
+void refresh_priority() {
+  struct thread *t = thread_current();
+  t->priority = t->init_priority;
+  if (!list_empty(&t->donations)) {
+    list_sort(&t->donations, cmp_donate_priority, 0);
+    struct thread *nxt =
+        list_entry(list_front(&t->donations), struct thread, donation_elem);
+    if (nxt->priority > t->priority)
+      t->priority = nxt->priority;
+  }
 }
 
 /* Returns true if the current thread holds LOCK, false
@@ -326,4 +368,10 @@ bool cmp_sem_priority(const struct list_elem *a, const struct list_elem *b,
       list_entry(list_begin(&sb->semaphore.waiters), struct thread, elem);
 
   return ta->priority > tb->priority;
+}
+
+bool cmp_donate_priority(const struct list_elem *a, const struct list_elem *b,
+                         void *aux UNUSED) {
+  return list_entry(a, struct thread, donation_elem)->priority >
+         list_entry(b, struct thread, donation_elem)->priority;
 }
