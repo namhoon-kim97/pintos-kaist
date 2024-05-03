@@ -92,6 +92,11 @@ struct thread {
   char name[16];             /* Name (for debugging purposes). */
   int priority;              /* Priority. */
 
+  int init_priority;
+  struct lock *wait_lock;
+  struct list donations;
+  struct list_elem donation_elem;
+
   /* Shared between thread.c and synch.c. */
   struct list_elem elem; /* List element. */
   int64_t wakeup_tick;   /* Wake up tick */
@@ -126,7 +131,6 @@ typedef void thread_func(void *aux);
 tid_t thread_create(const char *name, int priority, thread_func *, void *);
 bool cmp_priority(const struct list_elem *a, const struct list_elem *b,
                   void *aux UNUSED);
-void test_max_priority();
 void priority_preemption();
 
 void thread_block(void);

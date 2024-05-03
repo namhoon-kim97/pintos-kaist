@@ -341,22 +341,11 @@ bool cmp_priority(const struct list_elem *a, const struct list_elem *b,
           list_entry(b, struct thread, elem)->priority);
 }
 
-void test_max_priority() {
-  if (list_empty(&ready_list))
-    return;
-  struct thread *t = list_entry(list_front(&ready_list), struct thread, elem);
-
-  // 현재 스레드의 바뀐 priority가 ready_list의 max priority보다 작다면
-  if (thread_get_priority() < t->priority) {
-    thread_yield();
-  }
-}
-
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void thread_set_priority(int new_priority) {
   thread_current()->init_priority = new_priority;
   refresh_priority();
-  test_max_priority();
+  priority_preemption();
 }
 
 /* Returns the current thread's priority. */
