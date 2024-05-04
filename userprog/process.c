@@ -179,6 +179,12 @@ int process_exec(void *f_name) {
   NOT_REACHED();
 }
 
+void load_to_reg(struct intr_frame *_if, char *file_name) {
+  _if->R.rsi = (uint64_t)file_name;
+  _if->R.rdi = 1;
+  _if->rsp += strlen(file_name);
+}
+
 /* Waits for thread TID to die and returns its exit status.  If
  * it was terminated by the kernel (i.e. killed due to an
  * exception), returns -1.  If TID is invalid or if it was not a
@@ -192,6 +198,7 @@ int process_wait(tid_t child_tid UNUSED) {
   /* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
    * XXX:       to add infinite loop here before
    * XXX:       implementing the process_wait. */
+  thread_sleep(150);
   return -1;
 }
 
@@ -319,6 +326,18 @@ static bool load(const char *file_name, struct intr_frame *if_) {
     goto done;
   process_activate(thread_current());
 
+  /* 문자열 parsing */
+  char *temp, *token;
+  char *argv[128];
+  uint64_t argc = 0;
+  token = strtok_r(file_name, " ", &temp);
+  file_name = token;
+  while (token != NULL) {
+    argv[argc++] = token;
+    token = strtok_r(NULL, " ", &temp);
+  }
+  argv[argc] = '\0';
+
   /* Open executable file. */
   file = filesys_open(file_name);
   if (file == NULL) {
@@ -397,6 +416,41 @@ static bool load(const char *file_name, struct intr_frame *if_) {
 
   /* TODO: Your code goes here.
    * TODO: Implement argument passing (see project2/argument_passing.html). */
+  char **argv_ptr = argv + argc - 1;
+  uint64_t len, sum, padding;
+  while (argv_ptr >= argv) {
+    len = strlen(*argv_ptr) + 1;
+    sum += len;
+    if_->rsp -= len;
+
+    memcpy(if_->rsp, *argv_ptr, len);
+
+    argv_ptr--;
+  }
+  padding = (8 - (sum % 8)) % 8;
+
+  if_->rsp -= padding;
+  if_->rsp -= 8;
+  *(uint64_t *)(if_->rsp) = 0;
+
+  argv_ptr = argv + argc - 1;
+  char *rsp_temp = if_->rsp + 8 + padding + sum;
+  while (argv_ptr >= argv) {
+    len = strlen(*argv_ptr) + 1;
+    rsp_temp -= len;
+    if_->rsp -= 8;
+
+    memcpy(if_->rsp, &rsp_temp, 8);
+    argv_ptr--;
+  }
+  if_->rsp -= 8;
+  *(uint64_t *)(if_->rsp) = 0;
+
+  hex_dump(if_->rsp, if_->rsp, USER_STACK - if_->rsp, true);
+
+  if_->rsp += 8;
+  if_->R.rsi = if_->rsp;
+  if_->R.rdi = argc;
 
   success = true;
 
