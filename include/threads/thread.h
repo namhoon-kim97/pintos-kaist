@@ -101,6 +101,9 @@ struct thread {
   struct list_elem elem; /* List element. */
   int64_t wakeup_tick;   /* Wake up tick */
 
+  /* for project2 */
+  int exit_status;
+
 #ifdef USERPROG
   /* Owned by userprog/process.c. */
   uint64_t *pml4; /* Page map level 4 */

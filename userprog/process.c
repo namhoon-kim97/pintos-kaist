@@ -446,10 +446,9 @@ static bool load(const char *file_name, struct intr_frame *if_) {
   if_->rsp -= 8;
   *(uint64_t *)(if_->rsp) = 0;
 
-  hex_dump(if_->rsp, if_->rsp, USER_STACK - if_->rsp, true);
+  // hex_dump(if_->rsp, if_->rsp, USER_STACK - if_->rsp, true);
 
-  if_->rsp += 8;
-  if_->R.rsi = if_->rsp;
+  if_->R.rsi = if_->rsp + 8;
   if_->R.rdi = argc;
 
   success = true;
