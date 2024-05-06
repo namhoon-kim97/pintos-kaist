@@ -46,6 +46,8 @@ tid_t process_create_initd(const char *file_name) {
     return TID_ERROR;
   strlcpy(fn_copy, file_name, PGSIZE);
 
+  char *temp;
+  file_name = strtok_r(file_name, " ", &temp);
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create(file_name, PRI_DEFAULT, initd, fn_copy);
   if (tid == TID_ERROR)
@@ -427,7 +429,7 @@ static bool load(const char *file_name, struct intr_frame *if_) {
 
     argv_ptr--;
   }
-  padding = (8 - (sum % 8)) % 8;
+  padding = 8 - (sum % 8);
 
   if_->rsp -= padding;
   if_->rsp -= 8;
