@@ -436,6 +436,9 @@ static void init_thread(struct thread *t, const char *name, int priority) {
   list_init(&t->donations);
   t->init_priority = priority;
   t->wait_lock = NULL;
+
+  t->exit_status = 0;
+  t->fdt = NULL;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

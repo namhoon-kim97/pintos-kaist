@@ -103,6 +103,7 @@ struct thread {
 
   /* for project2 */
   int exit_status;
+  struct file **fdt;
 
 #ifdef USERPROG
   /* Owned by userprog/process.c. */
