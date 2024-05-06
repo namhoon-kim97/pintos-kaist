@@ -1,4 +1,5 @@
 #include "userprog/syscall.h"
+#include "filesys/filesys.h"
 #include "intrinsic.h"
 #include "threads/flags.h"
 #include "threads/interrupt.h"
@@ -10,6 +11,25 @@
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
+
+/* Projects 2 and later. */
+void halt(void) NO_RETURN;
+void exit(int status) NO_RETURN;
+tid_t fork(const char *thread_name);
+int exec(const char *file);
+int wait(tid_t);
+_Bool create(const char *file, unsigned initial_size);
+_Bool remove_file(const char *file);
+int open(const char *file);
+int filesize(int fd);
+int read(int fd, void *buffer, unsigned length);
+int write(int fd, const void *buffer, unsigned length);
+void seek(int fd, unsigned position);
+unsigned tell(int fd);
+void close(int fd);
+
+int dup2(int oldfd, int newfd);
+void check_address(void *addr);
 
 /* System call.
  *
@@ -47,15 +67,58 @@ void syscall_handler(struct intr_frame *f UNUSED) {
   case SYS_EXIT:
     exit(f->R.rdi);
     break;
+  case SYS_CREATE:
+    f->R.rax = create(f->R.rdi, f->R.rsi);
+    break;
+  case SYS_REMOVE:
+    f->R.rax = remove(f->R.rdi);
+    break;
+  case SYS_WRITE:
+    printf("%s", f->R.rsi);
+    break;
+  case SYS_EXEC:
+    exec(f->R.rdi);
+    break;
+  case SYS_WAIT:
+    wait(f->R.rdi);
+    break;
+  case SYS_OPEN:
+    f->R.rax = open(f->R.rdi);
+    break;
 
   default:
     break;
   }
 }
 
+void check_address(void *addr) {
+  if (addr == NULL || is_kernel_vaddr(addr) ||
+      pml4_get_page(thread_current()->pml4, addr) == NULL)
+    exit(-1);
+}
+
 void halt() { power_off(); }
 
 void exit(int status) {
+  printf("%s: exit(0)\n", thread_current()->name);
   thread_current()->exit_status = status;
   thread_exit();
+}
+
+int exec(const char *file) {}
+
+int wait(tid_t tid) {}
+
+_Bool create(const char *file, unsigned initial_size) {
+  check_address(file);
+  return filesys_create(file, initial_size);
+}
+_Bool remove(const char *file) {
+  check_address(file);
+  return filesys_remove(file);
+}
+
+int open(const char *file) {
+  check_address(file);
+  return -1;
 }
