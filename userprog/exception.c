@@ -3,6 +3,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "userprog/gdt.h"
+#include "userprog/syscall.h"
 #include <inttypes.h>
 #include <stdio.h>
 
@@ -83,6 +84,7 @@ static void kill(struct intr_frame *f) {
     thread_exit();
 
   case SEL_KCSEG:
+
     /* Kernel's code segment, which indicates a kernel bug.
        Kernel code shouldn't throw exceptions.  (Page faults
        may cause kernel exceptions--but they shouldn't arrive
@@ -136,6 +138,10 @@ static void page_fault(struct intr_frame *f) {
   /* For project 3 and later. */
   if (vm_try_handle_fault(f, fault_addr, user, write, not_present))
     return;
+#endif
+#ifdef USERPROG
+  /* Activate the new address space. */
+  check_address(f->R.rax);
 #endif
 
   /* Count page faults. */
