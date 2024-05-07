@@ -84,9 +84,9 @@ void syscall_handler(struct intr_frame *f UNUSED) {
   case SYS_REMOVE:
     f->R.rax = remove(f->R.rdi);
     break;
-  case SYS_WRITE:
-    printf("%s", f->R.rsi);
-    break;
+  // case SYS_WRITE:
+  //   printf("%s", f->R.rsi);
+  //   break;
   case SYS_EXEC:
     exec(f->R.rdi);
     break;
@@ -107,6 +107,7 @@ void syscall_handler(struct intr_frame *f UNUSED) {
     break;
   case SYS_WRITE:
     f->R.rax = write(f->R.rdi, f->R.rsi, f->R.rdx);
+    break;
 
   default:
     break;
@@ -218,4 +219,21 @@ int read(int fd, void *buffer, unsigned size) {
 int write(int fd, const void *buffer, unsigned size) {
   check_valid_fd(fd);
   check_address(buffer);
+
+  if (fd == 0)
+    return -1;
+  if (fd == 1) {
+    putbuf(buffer, size);
+    return size;
+  }
+
+  struct thread *cur = thread_current();
+  if (cur->fdt[fd] == NULL)
+    exit(-1);
+
+  lock_acquire(&fs_lock);
+  int ret = file_write(cur->fdt[fd], buffer, size);
+  lock_release(&fs_lock);
+
+  return ret;
 }
