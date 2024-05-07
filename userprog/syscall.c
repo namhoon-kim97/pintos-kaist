@@ -84,15 +84,6 @@ void syscall_handler(struct intr_frame *f UNUSED) {
   case SYS_REMOVE:
     f->R.rax = remove(f->R.rdi);
     break;
-  // case SYS_WRITE:
-  //   printf("%s", f->R.rsi);
-  //   break;
-  case SYS_EXEC:
-    exec(f->R.rdi);
-    break;
-  case SYS_WAIT:
-    wait(f->R.rdi);
-    break;
   case SYS_OPEN:
     f->R.rax = open(f->R.rdi);
     break;
@@ -107,6 +98,18 @@ void syscall_handler(struct intr_frame *f UNUSED) {
     break;
   case SYS_WRITE:
     f->R.rax = write(f->R.rdi, f->R.rsi, f->R.rdx);
+    break;
+  case SYS_SEEK:
+    seek(f->R.rdi, f->R.rsi);
+    break;
+  case SYS_TELL:
+    tell(f->R.rdi);
+    break;
+  case SYS_EXEC:
+    exec(f->R.rdi);
+    break;
+  case SYS_FORK:
+    f->R.rax = fork(f->R.rdi);
     break;
 
   default:
@@ -127,10 +130,6 @@ void exit(int status) {
   thread_current()->exit_status = status;
   thread_exit();
 }
-
-int exec(const char *file) {}
-
-int wait(tid_t tid) {}
 
 bool create(const char *file, unsigned initial_size) {
   check_address(file);
@@ -157,7 +156,7 @@ int open(const char *file) {
   if (opened_file == NULL)
     return -1;
 
-  for (int i = 3; i < FD_TABLE_SIZE; i++) {
+  for (int i = 2; i < FD_TABLE_SIZE; i++) {
     if (cur->fdt[i] == NULL) {
       cur->fdt[i] = opened_file;
       return i;
@@ -237,3 +236,25 @@ int write(int fd, const void *buffer, unsigned size) {
 
   return ret;
 }
+
+void seek(int fd, unsigned position) {
+  check_valid_fd(fd);
+  struct thread *cur = thread_current();
+  if (cur->fdt[fd] == NULL)
+    exit(-1);
+  file_seek(cur->fdt[fd], position);
+}
+
+unsigned tell(int fd) {
+  check_valid_fd(fd);
+  struct thread *cur = thread_current();
+  if (cur->fdt[fd] == NULL)
+    exit(-1);
+  return file_tell(cur->fdt[fd]);
+}
+
+int exec(const char *file) { return process_exec(file); }
+
+tid_t fork(const char *thread_name) {}
+
+int wait(tid_t tid) {}
