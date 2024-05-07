@@ -1,4 +1,5 @@
 #include "userprog/syscall.h"
+#include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "intrinsic.h"
 #include "threads/flags.h"
@@ -21,7 +22,7 @@ tid_t fork(const char *thread_name);
 int exec(const char *file);
 int wait(tid_t);
 bool create(const char *file, unsigned initial_size);
-bool remove_file(const char *file);
+bool remove(const char *file);
 int open(const char *file);
 int filesize(int fd);
 int read(int fd, void *buffer, unsigned length);
@@ -32,6 +33,7 @@ void close(int fd);
 
 int dup2(int oldfd, int newfd);
 void check_address(void *addr);
+void check_valid_fd(int fd);
 
 /* System call.
  *
@@ -46,8 +48,9 @@ void check_address(void *addr);
 #define MSR_LSTAR 0xc0000082        /* Long mode SYSCALL target */
 #define MSR_SYSCALL_MASK 0xc0000084 /* Mask for the eflags */
 
-#define FD_TABLE_SIZE 193;
-static struct lock lock;
+#define FD_TABLE_SIZE 193
+static struct lock fs_lock;
+static struct lock fd_table_lock;
 
 void syscall_init(void) {
   write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48 | ((uint64_t)SEL_KCSEG)
@@ -59,6 +62,9 @@ void syscall_init(void) {
    * mode stack. Therefore, we masked the FLAG_FL. */
   write_msr(MSR_SYSCALL_MASK,
             FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+
+  lock_init(&fs_lock);
+  lock_init(&fd_table_lock);
 }
 
 /* The main system call interface */
@@ -90,6 +96,17 @@ void syscall_handler(struct intr_frame *f UNUSED) {
   case SYS_OPEN:
     f->R.rax = open(f->R.rdi);
     break;
+  case SYS_CLOSE:
+    close(f->R.rdi);
+    break;
+  case SYS_FILESIZE:
+    f->R.rax = filesize(f->R.rdi);
+    break;
+  case SYS_READ:
+    f->R.rax = read(f->R.rdi, f->R.rsi, f->R.rdx);
+    break;
+  case SYS_WRITE:
+    f->R.rax = write(f->R.rdi, f->R.rsi, f->R.rdx);
 
   default:
     break;
@@ -135,6 +152,7 @@ int open(const char *file) {
     return -1;
 
   struct file *opened_file = filesys_open(file);
+
   if (opened_file == NULL)
     return -1;
 
@@ -146,4 +164,58 @@ int open(const char *file) {
   }
 
   return -1;
+}
+
+void check_valid_fd(int fd) {
+  if (0 > fd || fd >= FD_TABLE_SIZE)
+    exit(-1);
+}
+
+void close(int fd) {
+  check_valid_fd(fd);
+
+  struct thread *cur = thread_current();
+  if (cur->fdt[fd] == NULL)
+    exit(-1);
+  cur->fdt[fd] = NULL;
+
+  file_close(cur->fdt[fd]);
+}
+
+int filesize(int fd) {
+  check_valid_fd(fd);
+  struct thread *cur = thread_current();
+  if (cur->fdt[fd] == NULL)
+    exit(-1);
+
+  return file_length(cur->fdt[fd]);
+}
+
+int read(int fd, void *buffer, unsigned size) {
+  check_valid_fd(fd);
+  check_address(buffer);
+
+  if (fd == 0) {
+    for (int i = 0; i < size; i++) {
+      ((char *)buffer)[i] = input_getc();
+    }
+    return size;
+  }
+  if (fd == 1)
+    return -1;
+
+  struct thread *cur = thread_current();
+  if (cur->fdt[fd] == NULL)
+    exit(-1);
+
+  lock_acquire(&fs_lock);
+  int ret = file_read(cur->fdt[fd], buffer, size);
+  lock_release(&fs_lock);
+
+  return ret;
+}
+
+int write(int fd, const void *buffer, unsigned size) {
+  check_valid_fd(fd);
+  check_address(buffer);
 }
