@@ -9,31 +9,9 @@
 #include "threads/synch.h"
 #include "threads/thread.h"
 #include "userprog/gdt.h"
+#include "userprog/process.h"
 #include <stdio.h>
 #include <syscall-nr.h>
-
-void syscall_entry(void);
-void syscall_handler(struct intr_frame *);
-
-/* Projects 2 and later. */
-void halt(void) NO_RETURN;
-void exit(int status) NO_RETURN;
-tid_t fork(const char *thread_name);
-int exec(const char *file);
-int wait(tid_t);
-bool create(const char *file, unsigned initial_size);
-bool remove(const char *file);
-int open(const char *file);
-int filesize(int fd);
-int read(int fd, void *buffer, unsigned length);
-int write(int fd, const void *buffer, unsigned length);
-void seek(int fd, unsigned position);
-unsigned tell(int fd);
-void close(int fd);
-
-int dup2(int oldfd, int newfd);
-void check_address(void *addr);
-void check_valid_fd(int fd);
 
 /* System call.
  *
@@ -49,8 +27,32 @@ void check_valid_fd(int fd);
 #define MSR_SYSCALL_MASK 0xc0000084 /* Mask for the eflags */
 
 #define FD_TABLE_SIZE 193
+#define pid_t tid_t
 static struct lock fs_lock;
 static struct lock fd_table_lock;
+
+void syscall_entry(void);
+void syscall_handler(struct intr_frame *);
+
+/* Projects 2 and later. */
+void halt(void) NO_RETURN;
+void exit(int status) NO_RETURN;
+pid_t fork(const char *thread_name, struct intr_frame *f);
+int exec(const char *file);
+int wait(pid_t);
+bool create(const char *file, unsigned initial_size);
+bool remove(const char *file);
+int open(const char *file);
+int filesize(int fd);
+int read(int fd, void *buffer, unsigned length);
+int write(int fd, const void *buffer, unsigned length);
+void seek(int fd, unsigned position);
+unsigned tell(int fd);
+void close(int fd);
+
+int dup2(int oldfd, int newfd);
+void check_address(void *addr);
+void check_valid_fd(int fd);
 
 void syscall_init(void) {
   write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48 | ((uint64_t)SEL_KCSEG)
@@ -109,7 +111,7 @@ void syscall_handler(struct intr_frame *f UNUSED) {
     exec(f->R.rdi);
     break;
   case SYS_FORK:
-    f->R.rax = fork(f->R.rdi);
+    f->R.rax = fork(f->R.rdi, f);
     break;
 
   default:
@@ -146,11 +148,6 @@ int open(const char *file) {
   check_address(file);
 
   struct thread *cur = thread_current();
-  if (cur->fdt == NULL)
-    cur->fdt = (struct file **)palloc_get_page(PAL_ZERO);
-  if (cur->fdt == NULL)
-    return -1;
-
   struct file *opened_file = filesys_open(file);
 
   if (opened_file == NULL)
@@ -255,6 +252,9 @@ unsigned tell(int fd) {
 
 int exec(const char *file) { return process_exec(file); }
 
-tid_t fork(const char *thread_name) {}
+pid_t fork(const char *thread_name, struct intr_frame *f) {
+  memcpy(&(thread_current()->parent_tf), f, sizeof(struct intr_frame));
+  return process_fork(thread_name, f);
+}
 
-int wait(tid_t tid) {}
+int wait(pid_t pid) {}
