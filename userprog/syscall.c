@@ -147,7 +147,7 @@ int open(const char *file) {
 
   struct thread *cur = thread_current();
   if (cur->fdt == NULL)
-    cur->fdt = palloc_get_page(PAL_ZERO);
+    cur->fdt = (struct file **)palloc_get_page(PAL_ZERO);
   if (cur->fdt == NULL)
     return -1;
 
