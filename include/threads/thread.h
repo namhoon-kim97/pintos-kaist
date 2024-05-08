@@ -1,6 +1,7 @@
 #ifndef THREADS_THREAD_H
 #define THREADS_THREAD_H
 
+#include "threads/synch.h"
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
@@ -104,6 +105,12 @@ struct thread {
   /* for project2 */
   int exit_status;
   struct file **fdt;
+  struct intr_frame parent_tf;
+
+  struct list children;
+  struct list_elem child_elem;
+
+  struct semaphore fork_sema;
 
 #ifdef USERPROG
   /* Owned by userprog/process.c. */

@@ -9,31 +9,9 @@
 #include "threads/synch.h"
 #include "threads/thread.h"
 #include "userprog/gdt.h"
+#include "userprog/process.h"
 #include <stdio.h>
 #include <syscall-nr.h>
-
-void syscall_entry(void);
-void syscall_handler(struct intr_frame *);
-
-/* Projects 2 and later. */
-void halt(void) NO_RETURN;
-void exit(int status) NO_RETURN;
-tid_t fork(const char *thread_name);
-int exec(const char *file);
-int wait(tid_t);
-bool create(const char *file, unsigned initial_size);
-bool remove(const char *file);
-int open(const char *file);
-int filesize(int fd);
-int read(int fd, void *buffer, unsigned length);
-int write(int fd, const void *buffer, unsigned length);
-void seek(int fd, unsigned position);
-unsigned tell(int fd);
-void close(int fd);
-
-int dup2(int oldfd, int newfd);
-void check_address(void *addr);
-void check_valid_fd(int fd);
 
 /* System call.
  *
@@ -49,8 +27,32 @@ void check_valid_fd(int fd);
 #define MSR_SYSCALL_MASK 0xc0000084 /* Mask for the eflags */
 
 #define FD_TABLE_SIZE 193
+#define pid_t tid_t
 static struct lock fs_lock;
 static struct lock fd_table_lock;
+
+void syscall_entry(void);
+void syscall_handler(struct intr_frame *);
+
+/* Projects 2 and later. */
+void halt(void) NO_RETURN;
+void exit(int status) NO_RETURN;
+pid_t fork(const char *thread_name, struct intr_frame *f);
+int exec(const char *file);
+int wait(pid_t);
+bool create(const char *file, unsigned initial_size);
+bool remove(const char *file);
+int open(const char *file);
+int filesize(int fd);
+int read(int fd, void *buffer, unsigned length);
+int write(int fd, const void *buffer, unsigned length);
+void seek(int fd, unsigned position);
+unsigned tell(int fd);
+void close(int fd);
+
+int dup2(int oldfd, int newfd);
+void check_address(void *addr);
+void check_valid_fd(int fd);
 
 void syscall_init(void) {
   write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48 | ((uint64_t)SEL_KCSEG)
@@ -84,15 +86,6 @@ void syscall_handler(struct intr_frame *f UNUSED) {
   case SYS_REMOVE:
     f->R.rax = remove(f->R.rdi);
     break;
-  // case SYS_WRITE:
-  //   printf("%s", f->R.rsi);
-  //   break;
-  case SYS_EXEC:
-    exec(f->R.rdi);
-    break;
-  case SYS_WAIT:
-    wait(f->R.rdi);
-    break;
   case SYS_OPEN:
     f->R.rax = open(f->R.rdi);
     break;
@@ -107,6 +100,18 @@ void syscall_handler(struct intr_frame *f UNUSED) {
     break;
   case SYS_WRITE:
     f->R.rax = write(f->R.rdi, f->R.rsi, f->R.rdx);
+    break;
+  case SYS_SEEK:
+    seek(f->R.rdi, f->R.rsi);
+    break;
+  case SYS_TELL:
+    tell(f->R.rdi);
+    break;
+  case SYS_EXEC:
+    exec(f->R.rdi);
+    break;
+  case SYS_FORK:
+    f->R.rax = fork(f->R.rdi, f);
     break;
 
   default:
@@ -128,10 +133,6 @@ void exit(int status) {
   thread_exit();
 }
 
-int exec(const char *file) {}
-
-int wait(tid_t tid) {}
-
 bool create(const char *file, unsigned initial_size) {
   check_address(file);
 
@@ -147,17 +148,12 @@ int open(const char *file) {
   check_address(file);
 
   struct thread *cur = thread_current();
-  if (cur->fdt == NULL)
-    cur->fdt = palloc_get_page(PAL_ZERO);
-  if (cur->fdt == NULL)
-    return -1;
-
   struct file *opened_file = filesys_open(file);
 
   if (opened_file == NULL)
     return -1;
 
-  for (int i = 3; i < FD_TABLE_SIZE; i++) {
+  for (int i = 2; i < FD_TABLE_SIZE; i++) {
     if (cur->fdt[i] == NULL) {
       cur->fdt[i] = opened_file;
       return i;
@@ -237,3 +233,28 @@ int write(int fd, const void *buffer, unsigned size) {
 
   return ret;
 }
+
+void seek(int fd, unsigned position) {
+  check_valid_fd(fd);
+  struct thread *cur = thread_current();
+  if (cur->fdt[fd] == NULL)
+    exit(-1);
+  file_seek(cur->fdt[fd], position);
+}
+
+unsigned tell(int fd) {
+  check_valid_fd(fd);
+  struct thread *cur = thread_current();
+  if (cur->fdt[fd] == NULL)
+    exit(-1);
+  return file_tell(cur->fdt[fd]);
+}
+
+int exec(const char *file) { return process_exec(file); }
+
+pid_t fork(const char *thread_name, struct intr_frame *f) {
+  memcpy(&(thread_current()->parent_tf), f, sizeof(struct intr_frame));
+  return process_fork(thread_name, f);
+}
+
+int wait(pid_t pid) {}
