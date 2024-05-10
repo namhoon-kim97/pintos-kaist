@@ -113,6 +113,7 @@ struct thread {
   struct semaphore fork_sema;
   struct semaphore wait_sema;
   struct semaphore sup_sema;
+  struct file *running_f;
 
   struct thread *parent;
   bool loaded_success;

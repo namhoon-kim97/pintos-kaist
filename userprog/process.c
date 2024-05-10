@@ -30,6 +30,8 @@ static void __do_fork(void *);
 
 struct thread *get_child(tid_t c_tid);
 
+static struct lock f_lock;
+
 /* General process initializer for initd and other process. */
 static void process_init(void) { struct thread *current = thread_current(); }
 
@@ -65,7 +67,6 @@ static void initd(void *f_name) {
 #endif
 
   process_init();
-
   if (process_exec(f_name) < 0)
     PANIC("Fail to launch initd\n");
   NOT_REACHED();
@@ -261,6 +262,8 @@ void process_exit(void) {
 
   for (int i = 2; i < 193; i++)
     file_close(curr->fdt[i]);
+  file_close(curr->running_f);
+  palloc_free_page(curr->fdt);
   process_cleanup();
   sema_up(&curr->wait_sema);
   sema_down(&curr->sup_sema);
@@ -510,9 +513,11 @@ static bool load(const char *file_name, struct intr_frame *if_) {
 
   success = true;
 
+  t->running_f = file;
+
 done:
   /* We arrive here whether the load is successful or not. */
-  file_close(file);
+  // file_close(file);
   return success;
 }
 
