@@ -210,7 +210,7 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
   ASSERT(function != NULL);
 
   /* Allocate thread. */
-  t = palloc_get_page(PAL_ZERO);
+  t = (struct file **)palloc_get_page(PAL_ZERO);
   if (t == NULL)
     return TID_ERROR;
 
@@ -236,6 +236,8 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
   t->tf.cs = SEL_KCSEG;
   t->tf.eflags = FLAG_IF;
   memcpy(&(t->parent_tf), &(t->tf), sizeof(struct intr_frame));
+
+  list_push_back(&thread_current()->children, &t->child_elem);
 
   /* Add to run queue. */
   thread_unblock(t);
@@ -446,8 +448,11 @@ static void init_thread(struct thread *t, const char *name, int priority) {
   t->wait_lock = NULL;
 
   t->exit_status = 0;
+  t->parent = running_thread();
   list_init(&t->children);
   sema_init(&t->fork_sema, 0);
+  sema_init(&t->wait_sema, 0);
+  sema_init(&t->sup_sema, 0);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
