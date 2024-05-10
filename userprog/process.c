@@ -79,8 +79,9 @@ tid_t process_fork(const char *name, struct intr_frame *if_ UNUSED) {
   tid_t c_tid = thread_create(name, PRI_DEFAULT, __do_fork, thread_current());
   if (c_tid == NULL)
     return TID_ERROR;
+
   sema_down(&cur->fork_sema);
-  if (thread_current() != get_child(c_tid))
+  if (get_child(c_tid)->exit_status < 0)
     return TID_ERROR;
   return c_tid;
 }
@@ -186,11 +187,13 @@ static void __do_fork(void *aux) {
   /* Finally, switch to the newly created process. */
   if (succ) {
     sema_up(&parent->fork_sema);
-    list_push_back(&parent->children, &parent->child_elem);
     do_iret(&if_);
   }
 error:
-  thread_exit();
+  current->exit_status = TID_ERROR;
+  sema_up(&parent->fork_sema);
+  exit(-1);
+  // thread_exit();
 }
 
 /* Switch the current execution context to the f_name.
@@ -215,8 +218,9 @@ int process_exec(void *f_name) {
 
   /* If load failed, quit. */
   palloc_free_page(file_name);
-  if (!success)
+  if (!success) {
     return -1;
+  }
 
   /* Start switched process. */
   do_iret(&_if);
@@ -238,23 +242,28 @@ void load_to_reg(struct intr_frame *_if, char *file_name) {
  *
  * This function will be implemented in problem 2-2.  For now, it
  * does nothing. */
-int process_wait(tid_t child_tid UNUSED) {
-  /* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
-   * XXX:       to add infinite loop here before
-   * XXX:       implementing the process_wait. */
-  thread_sleep(150);
-  return -1;
+int process_wait(tid_t child_tid) {
+  struct thread *cur = thread_current();
+  struct thread *child = get_child(child_tid);
+  if (child == NULL)
+    return -1;
+  sema_down(&child->wait_sema);
+  int exit_status = child->exit_status;
+  list_remove(&child->child_elem);
+  sema_up(&child->sup_sema);
+
+  return exit_status;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
 void process_exit(void) {
   struct thread *curr = thread_current();
-  /* TODO: Your code goes here.
-   * TODO: Implement process termination message (see
-   * TODO: project2/process_termination.html).
-   * TODO: We recommend you to implement process resource cleanup here. */
 
+  for (int i = 2; i < 193; i++)
+    file_close(curr->fdt[i]);
   process_cleanup();
+  sema_up(&curr->wait_sema);
+  sema_down(&curr->sup_sema);
 }
 
 /* Free the current process's resources. */
@@ -354,7 +363,8 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 
 /* Loads an ELF executable from FILE_NAME into the current thread.
  * Stores the executable's entry point into *RIP
- * and its initial stack pointer into *RSP.
+ * and its initial stack pointerprintf("%s: exit(%d)\n", thread_current()->name,
+         thread_current()->exit_status); into *RSP.
  * Returns true if successful, false otherwise. */
 static bool load(const char *file_name, struct intr_frame *if_) {
   struct thread *t = thread_current();
@@ -388,6 +398,8 @@ static bool load(const char *file_name, struct intr_frame *if_) {
     printf("load: %s: open failed\n", file_name);
     goto done;
   }
+
+  file_deny_write(file);
 
   /* Read and verify executable header. */
   if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr ||
@@ -462,6 +474,7 @@ static bool load(const char *file_name, struct intr_frame *if_) {
    * TODO: Implement argument passing (see project2/argument_passing.html). */
   char **argv_ptr = argv + argc - 1;
   uint64_t len, sum, padding;
+  sum = 0;
   while (argv_ptr >= argv) {
     len = strlen(*argv_ptr) + 1;
     sum += len;
@@ -471,14 +484,14 @@ static bool load(const char *file_name, struct intr_frame *if_) {
 
     argv_ptr--;
   }
-  padding = 8 - (sum % 8);
+  padding = (8 - (sum % 8)) % 8;
 
   if_->rsp -= padding;
   if_->rsp -= 8;
   *(uint64_t *)(if_->rsp) = 0;
 
   argv_ptr = argv + argc - 1;
-  char *rsp_temp = if_->rsp + 8 + padding + sum;
+  char *rsp_temp = USER_STACK;
   while (argv_ptr >= argv) {
     len = strlen(*argv_ptr) + 1;
     rsp_temp -= len;

@@ -111,6 +111,11 @@ struct thread {
   struct list_elem child_elem;
 
   struct semaphore fork_sema;
+  struct semaphore wait_sema;
+  struct semaphore sup_sema;
+
+  struct thread *parent;
+  bool loaded_success;
 
 #ifdef USERPROG
   /* Owned by userprog/process.c. */

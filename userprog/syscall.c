@@ -11,6 +11,7 @@
 #include "userprog/gdt.h"
 #include "userprog/process.h"
 #include <stdio.h>
+#include <string.h>
 #include <syscall-nr.h>
 
 /* System call.
@@ -108,13 +109,13 @@ void syscall_handler(struct intr_frame *f UNUSED) {
     tell(f->R.rdi);
     break;
   case SYS_EXEC:
-    exec(f->R.rdi);
+    f->R.rax = exec(f->R.rdi);
     break;
   case SYS_FORK:
     f->R.rax = fork(f->R.rdi, f);
     break;
-
-  default:
+  case SYS_WAIT:
+    f->R.rax = wait(f->R.rdi);
     break;
   }
 }
@@ -128,8 +129,9 @@ void check_address(void *addr) {
 void halt() { power_off(); }
 
 void exit(int status) {
-  printf("%s: exit(%d)\n", thread_current()->name, status);
-  thread_current()->exit_status = status;
+  struct thread *curr = thread_current();
+  curr->exit_status = status;
+  printf("%s: exit(%d)\n", curr->name, curr->exit_status);
   thread_exit();
 }
 
@@ -250,11 +252,21 @@ unsigned tell(int fd) {
   return file_tell(cur->fdt[fd]);
 }
 
-int exec(const char *file) { return process_exec(file); }
+int exec(const char *file) {
+  check_address(file);
+
+  char *temp = palloc_get_page(PAL_ZERO);
+  if (temp == NULL)
+    return -1;
+  memcpy(temp, file, strlen(file) + 1);
+
+  return process_exec(temp);
+}
 
 pid_t fork(const char *thread_name, struct intr_frame *f) {
+  check_address(thread_name);
   memcpy(&(thread_current()->parent_tf), f, sizeof(struct intr_frame));
   return process_fork(thread_name, f);
 }
 
-int wait(pid_t pid) {}
+int wait(pid_t pid) { return process_wait(pid); }
