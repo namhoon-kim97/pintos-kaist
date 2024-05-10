@@ -151,7 +151,6 @@ int open(const char *file) {
 
   struct thread *cur = thread_current();
   struct file *opened_file = filesys_open(file);
-
   if (opened_file == NULL)
     return -1;
 
