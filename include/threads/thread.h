@@ -115,8 +115,9 @@ struct thread {
   struct semaphore sup_sema;
   struct file *running_f;
 
-  struct thread *parent;
-  bool loaded_success;
+  struct list fd_list;
+  int stdin_cnt;
+  int stdout_cnt;
 
 #ifdef USERPROG
   /* Owned by userprog/process.c. */

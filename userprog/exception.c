@@ -139,13 +139,12 @@ static void page_fault(struct intr_frame *f) {
   if (vm_try_handle_fault(f, fault_addr, user, write, not_present))
     return;
 #endif
-#ifdef USERPROG
+
   /* Activate the new address space. */
-  check_address(f->R.rax);
-#endif
 
   /* Count page faults. */
   page_fault_cnt++;
+  exit(-1);
 
   /* If the fault is true fault, show info and exit. */
   printf("Page fault at %p: %s error %s page in %s context.\n", fault_addr,

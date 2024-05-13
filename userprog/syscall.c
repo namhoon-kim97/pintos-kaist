@@ -1,6 +1,7 @@
 #include "userprog/syscall.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "filesys/inode.h"
 #include "intrinsic.h"
 #include "threads/flags.h"
 #include "threads/interrupt.h"
@@ -27,10 +28,9 @@
 #define MSR_LSTAR 0xc0000082        /* Long mode SYSCALL target */
 #define MSR_SYSCALL_MASK 0xc0000084 /* Mask for the eflags */
 
-#define FD_TABLE_SIZE 193
+#define FD_TABLE_SIZE 512
 #define pid_t tid_t
 static struct lock fs_lock;
-static struct lock fd_table_lock;
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
@@ -52,8 +52,11 @@ unsigned tell(int fd);
 void close(int fd);
 
 int dup2(int oldfd, int newfd);
-void check_address(void *addr);
+void check_address(const uint64_t *addr);
 void check_valid_fd(int fd);
+
+void increase_fd_ref(struct file *file, int fd);
+void decrease_fd_ref(struct file *file, int fd);
 
 void syscall_init(void) {
   write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48 | ((uint64_t)SEL_KCSEG)
@@ -67,7 +70,6 @@ void syscall_init(void) {
             FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 
   lock_init(&fs_lock);
-  lock_init(&fd_table_lock);
 }
 
 /* The main system call interface */
@@ -117,13 +119,17 @@ void syscall_handler(struct intr_frame *f UNUSED) {
   case SYS_WAIT:
     f->R.rax = wait(f->R.rdi);
     break;
+  case SYS_DUP2:
+    f->R.rax = dup2(f->R.rdi, f->R.rsi);
+    break;
   }
 }
 
-void check_address(void *addr) {
+void check_address(const uint64_t *addr) {
   if (addr == NULL || is_kernel_vaddr(addr) ||
-      pml4_get_page(thread_current()->pml4, addr) == NULL)
+      pml4_get_page(thread_current()->pml4, addr) == NULL) {
     exit(-1);
+  }
 }
 
 void halt() { power_off(); }
@@ -157,10 +163,11 @@ int open(const char *file) {
   for (int i = 2; i < FD_TABLE_SIZE; i++) {
     if (cur->fdt[i] == NULL) {
       cur->fdt[i] = opened_file;
+      increase_fd_ref(opened_file, i);
       return i;
     }
   }
-
+  free(opened_file);
   return -1;
 }
 
@@ -173,11 +180,19 @@ void close(int fd) {
   check_valid_fd(fd);
 
   struct thread *cur = thread_current();
+  if (fd == 0 || cur->fdt[fd] == cur->fdt[0]) {
+    cur->stdin_cnt--;
+    return;
+  }
+  if (fd == 1 || cur->fdt[fd] == cur->fdt[1]) {
+    cur->stdout_cnt--;
+    return;
+  }
   if (cur->fdt[fd] == NULL)
     exit(-1);
-  cur->fdt[fd] = NULL;
 
-  file_close(cur->fdt[fd]);
+  decrease_fd_ref(cur->fdt[fd], fd);
+  cur->fdt[fd] = NULL;
 }
 
 int filesize(int fd) {
@@ -193,7 +208,9 @@ int read(int fd, void *buffer, unsigned size) {
   check_valid_fd(fd);
   check_address(buffer);
 
-  if (fd == 0) {
+  struct thread *cur = thread_current();
+
+  if ((fd == 0 || cur->fdt[fd] == cur->fdt[0]) && cur->stdin_cnt > 0) {
     for (int i = 0; i < size; i++) {
       ((char *)buffer)[i] = input_getc();
     }
@@ -202,7 +219,6 @@ int read(int fd, void *buffer, unsigned size) {
   if (fd == 1)
     return -1;
 
-  struct thread *cur = thread_current();
   if (cur->fdt[fd] == NULL)
     exit(-1);
 
@@ -216,15 +232,15 @@ int read(int fd, void *buffer, unsigned size) {
 int write(int fd, const void *buffer, unsigned size) {
   check_valid_fd(fd);
   check_address(buffer);
+  struct thread *cur = thread_current();
 
   if (fd == 0)
     return -1;
-  if (fd == 1) {
+  if ((fd == 1 || cur->fdt[fd] == cur->fdt[1]) && cur->stdout_cnt > 0) {
     putbuf(buffer, size);
     return size;
   }
 
-  struct thread *cur = thread_current();
   if (cur->fdt[fd] == NULL)
     exit(-1);
 
@@ -269,3 +285,79 @@ pid_t fork(const char *thread_name, struct intr_frame *f) {
 }
 
 int wait(pid_t pid) { return process_wait(pid); }
+
+int dup2(int oldfd, int newfd) {
+  if (0 > oldfd || oldfd >= FD_TABLE_SIZE)
+    return -1;
+  if (oldfd == newfd)
+    return newfd;
+
+  struct thread *cur = thread_current();
+  if (oldfd == 0 || (cur->fdt[oldfd] == cur->fdt[0])) {
+    cur->stdin_cnt++;
+  }
+
+  if (oldfd == 1 || (cur->fdt[oldfd] == cur->fdt[1])) {
+    cur->stdout_cnt++;
+  }
+
+  if (cur->fdt[newfd] != NULL)
+    decrease_fd_ref(cur->fdt[newfd], newfd);
+
+  cur->fdt[newfd] = cur->fdt[oldfd];
+
+  if (cur->fdt[oldfd] != NULL)
+    increase_fd_ref(cur->fdt[oldfd], newfd);
+
+  return newfd;
+}
+
+void increase_fd_ref(struct file *file, int fd) {
+  struct thread *cur = thread_current();
+  if (fd == 0 || fd == 1) {
+    if (fd == 0)
+      cur->stdin_cnt++;
+    if (fd == 1)
+      cur->stdout_cnt++;
+  }
+
+  struct list_elem *e;
+  for (e = list_begin(&cur->fd_list); e != list_end(&cur->fd_list);
+       e = list_next(e)) {
+    struct file_fd *fd_ref = list_entry(e, struct file_fd, file_fd_elem);
+    if (fd_ref->file == file) {
+      fd_ref->ref_count++;
+      return;
+    }
+  }
+
+  // 없으면 생성
+  struct file_fd *new_ref = (struct fild_fd *)palloc_get_page(PAL_ZERO);
+  new_ref->file = file;
+  new_ref->ref_count = 1;
+  list_push_back(&cur->fd_list, &new_ref->file_fd_elem);
+}
+
+void decrease_fd_ref(struct file *file, int fd) {
+  struct thread *cur = thread_current();
+  if (fd == 0 || fd == 1) {
+    if (fd == 0)
+      cur->stdin_cnt--;
+    if (fd == 1)
+      cur->stdout_cnt--;
+  }
+
+  struct list_elem *e;
+  for (e = list_begin(&cur->fd_list); e != list_end(&cur->fd_list);
+       e = list_next(e)) {
+    struct file_fd *fd_ref = list_entry(e, struct file_fd, file_fd_elem);
+    if (fd_ref->file == file) {
+      if (--fd_ref->ref_count == 0) {
+        file_close(file);
+        list_remove(&fd_ref->file_fd_elem);
+        palloc_free_page(fd_ref);
+      }
+      return;
+    }
+  }
+}

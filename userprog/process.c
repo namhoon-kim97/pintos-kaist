@@ -12,6 +12,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/gdt.h"
+#include "userprog/syscall.h"
 #include "userprog/tss.h"
 #include <debug.h>
 #include <inttypes.h>
@@ -29,8 +30,6 @@ static void initd(void *f_name);
 static void __do_fork(void *);
 
 struct thread *get_child(tid_t c_tid);
-
-static struct lock f_lock;
 
 /* General process initializer for initd and other process. */
 static void process_init(void) { struct thread *current = thread_current(); }
@@ -81,9 +80,11 @@ tid_t process_fork(const char *name, struct intr_frame *if_ UNUSED) {
   if (c_tid == NULL)
     return TID_ERROR;
 
-  sema_down(&cur->fork_sema);
-  if (get_child(c_tid)->exit_status < 0)
+  struct thread *child = get_child(c_tid);
+  sema_down(&child->fork_sema);
+  if (child->exit_status < 0) {
     return TID_ERROR;
+  }
   return c_tid;
 }
 
@@ -150,8 +151,7 @@ static void __do_fork(void *aux) {
   struct thread *current = thread_current();
   /* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
   struct intr_frame *parent_if = &parent->parent_tf;
-
-  bool succ = true;
+  bool succ = false;
 
   /* 1. Read the cpu context to local stack. */
   memcpy(&if_, parent_if, sizeof(struct intr_frame));
@@ -177,24 +177,48 @@ static void __do_fork(void *aux) {
    * TODO:       in include/filesys/file.h. Note that parent should not return
    * TODO:       from the fork() until this function successfully duplicates
    * TODO:       the resources of parent.*/
-  for (int i = 2; i < 193; i++) {
+
+  for (int i = 2; i < 512; i++) {
     if (parent->fdt[i]) {
-      current->fdt[i] = file_duplicate(parent->fdt[i]);
+      current->fdt[i] = (parent->fdt[i]);
+      if (current->fdt[i] == NULL) {
+        goto error;
+      }
+    }
+  }
+
+  struct list_elem *e;
+  for (e = list_begin(&parent->fd_list); e != list_end(&parent->fd_list);
+       e = list_next(e)) {
+    struct file_fd *parent_fd_ref = list_entry(e, struct file_fd, file_fd_elem);
+    struct file_fd *new_fd_ref = (struct file_fd *)palloc_get_page(PAL_ZERO);
+    if (new_fd_ref) {
+      new_fd_ref->file = find_child_file(parent_fd_ref->file);
+      new_fd_ref->ref_count = parent_fd_ref->ref_count;
+      list_push_back(&current->fd_list, &new_fd_ref->file_fd_elem);
     }
   }
 
   process_init();
+  sema_up(&current->fork_sema);
+  succ = true;
 
   /* Finally, switch to the newly created process. */
   if (succ) {
-    sema_up(&parent->fork_sema);
     do_iret(&if_);
   }
 error:
   current->exit_status = TID_ERROR;
-  sema_up(&parent->fork_sema);
+  sema_up(&current->fork_sema);
   exit(-1);
   // thread_exit();
+}
+
+struct file *find_child_file(struct file *parent) {
+  for (int i = 2; i < 512; i++) {
+    if (file_get_inode(parent) == file_get_inode(thread_current()->fdt[i]))
+      return thread_current()->fdt[i];
+  }
 }
 
 /* Switch the current execution context to the f_name.
@@ -248,6 +272,7 @@ int process_wait(tid_t child_tid) {
   struct thread *child = get_child(child_tid);
   if (child == NULL)
     return -1;
+
   sema_down(&child->wait_sema);
   int exit_status = child->exit_status;
   list_remove(&child->child_elem);
@@ -260,10 +285,26 @@ int process_wait(tid_t child_tid) {
 void process_exit(void) {
   struct thread *curr = thread_current();
 
-  for (int i = 2; i < 193; i++)
-    file_close(curr->fdt[i]);
-  file_close(curr->running_f);
+  struct list_elem *e;
+  struct thread *t = thread_current();
+  for (e = list_begin(&t->children); e != list_end(&t->children);
+       e = list_next(e)) {
+    struct thread *nxt = list_entry(e, struct thread, child_elem);
+    sema_up(&nxt->sup_sema);
+  }
+
+  for (int i = 2; i < 512; i++) {
+    decrease_fd_ref(curr->fdt[i], i);
+  }
+
+  if (curr->stdin_cnt > 0)
+    curr->stdin_cnt = 0;
+
+  if (curr->stdout_cnt > 0)
+    curr->stdout_cnt = 0;
+
   palloc_free_page(curr->fdt);
+  file_close(curr->running_f);
   process_cleanup();
   sema_up(&curr->wait_sema);
   sema_down(&curr->sup_sema);
