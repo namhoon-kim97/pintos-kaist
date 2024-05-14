@@ -192,6 +192,7 @@ void close(int fd) {
     exit(-1);
 
   decrease_fd_ref(cur->fdt[fd], fd);
+  file_close(cur->fdt[fd]);
   cur->fdt[fd] = NULL;
 }
 
@@ -293,33 +294,25 @@ int dup2(int oldfd, int newfd) {
     return newfd;
 
   struct thread *cur = thread_current();
-  if (oldfd == 0 || (cur->fdt[oldfd] == cur->fdt[0])) {
-    cur->stdin_cnt++;
-  }
-
-  if (oldfd == 1 || (cur->fdt[oldfd] == cur->fdt[1])) {
-    cur->stdout_cnt++;
-  }
 
   if (cur->fdt[newfd] != NULL)
-    decrease_fd_ref(cur->fdt[newfd], newfd);
+    decrease_fd_ref(cur->fdt[newfd], oldfd);
 
   cur->fdt[newfd] = cur->fdt[oldfd];
 
   if (cur->fdt[oldfd] != NULL)
-    increase_fd_ref(cur->fdt[oldfd], newfd);
+    increase_fd_ref(cur->fdt[oldfd], oldfd);
 
   return newfd;
 }
 
 void increase_fd_ref(struct file *file, int fd) {
   struct thread *cur = thread_current();
-  if (fd == 0 || fd == 1) {
-    if (fd == 0)
-      cur->stdin_cnt++;
-    if (fd == 1)
-      cur->stdout_cnt++;
-  }
+
+  if (fd == 0)
+    cur->stdin_cnt++;
+  if (fd == 1)
+    cur->stdout_cnt++;
 
   struct list_elem *e;
   for (e = list_begin(&cur->fd_list); e != list_end(&cur->fd_list);
@@ -340,12 +333,11 @@ void increase_fd_ref(struct file *file, int fd) {
 
 void decrease_fd_ref(struct file *file, int fd) {
   struct thread *cur = thread_current();
-  if (fd == 0 || fd == 1) {
-    if (fd == 0)
-      cur->stdin_cnt--;
-    if (fd == 1)
-      cur->stdout_cnt--;
-  }
+
+  if (fd == 0)
+    cur->stdin_cnt--;
+  if (fd == 1)
+    cur->stdout_cnt--;
 
   struct list_elem *e;
   for (e = list_begin(&cur->fd_list); e != list_end(&cur->fd_list);
